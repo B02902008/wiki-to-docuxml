@@ -3,7 +3,7 @@ function http_get(url) {
 	/*
 	 * Reference: https://stackoverflow.com/questions/247483/http-get-request-in-javascript
 	 * */
-	console.log("get:" + url);
+	//console.log("get:" + url);
 	var xmlHttp;
 	xmlHttp = new XMLHttpRequest();
 	xmlHttp.open("GET", url, false); // synchronous, this code doesn"t run on UI thread.

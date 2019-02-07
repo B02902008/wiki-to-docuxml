@@ -1,8 +1,11 @@
 // Function : initial window variable
 function window_variable_initial() {
     window.corpus_list = null;
+    window.corpus_tree = null;
     window.corpus_target = null;
     window.table_wiki_list = null;
+    window.table_wiki_target = null;
+    window.entire_book_check_queue = null;
 }
 
 //Function : hash function
@@ -41,11 +44,17 @@ function elementFactory(data) {
     return el;
 }
 
+// Function : make sure url is decoded
+function confirm_decode(s) {
+    let ss = decodeURIComponent(s);
+    return (s === ss) ? s : ss;
+}
+
 // Function : check synchronize between wiki document table and docuXML
 function check_sync(content, btn_y, btn_n, callback) {
     let sync = true;
     $('#wiki-table-body tr').each(function() {
-        let st = $(this).attr("status");
+        let st = $(this).attr("state");
         if (st !== "0" && st !== "4")
             sync = false;
     });
@@ -54,7 +63,6 @@ function check_sync(content, btn_y, btn_n, callback) {
         // no button
         $(dialog).append(elementFactory({
             type: "button",
-            attr: { id: "sync-dialog-no-btn" },
             class: "btn btn-default btn-xs",
             css: { margin: "10px 20px 0 0" },
             html: btn_n,
@@ -63,7 +71,6 @@ function check_sync(content, btn_y, btn_n, callback) {
         // yes button
         $(dialog).append(elementFactory({
             type: "button",
-            attr: { id: "sync-dialog-yes-btn" },
             class: "btn btn-default btn-xs",
             css: { margin: "10px 0 0 20px" },
             html: btn_y,
@@ -80,39 +87,18 @@ function check_sync(content, btn_y, btn_n, callback) {
 
 // Function : delete button click function
 function click_delete_btn(e) {
-    let key = $(e.data.target).attr("key");
-    let row = $("#" + key);
-    let span = $("#" + key + " td:nth-child(1) span")[0];
-
-    // disabled
     if ($(e.data.target).hasClass("disabled"))
         return;
-
-    // delete line
-    if ($(row).css("text-decoration-line") === "none")
-        $(row).css("text-decoration-line", "line-through");
-    else
-        $(row).css("text-decoration-line", "none");
-
-    // row status
-    $(row).attr("status", ((parseInt($(row).attr("status")) + 2) % 4).toString());
-
-    // status sign
-    if ($(row).attr("status") === "0") {
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-ok");
-        $(span).css("color", "green");
-    } else if ($(row).attr("status") !== "4") {
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-hourglass");
-        $(span).css("color", "black");
-    }
+    let row = $("#" + ($(e.data.target).attr("key")));
+    let node = window.corpus_tree.access_child_with_full_position($(row).attr("pos"));
+    node.set_state((parseInt($(row).attr("state")) + 2) % 4);
+    refresh_wiki_table();
 }
 
 // Function : related entry item click function
 function click_related_entry_item(e) {
     let self = e.data.target;
-    let key = $(self).attr("title");
+    let name = $(self).attr("title");
     let url = $(self).attr("url");
     let parent;
     if ($(self).parent().attr("id") === "related-entry-src-list")
@@ -122,9 +108,9 @@ function click_related_entry_item(e) {
     $(self).remove();
     $(parent).append(elementFactory({
         type: "div",
-        attr: { url: url, title: key },
+        attr: { url: url, title: name },
         class: "related-entry-item select-disable",
-        html: key,
+        html: name,
         on: { click: click_related_entry_item }
     }));
 }
@@ -132,13 +118,13 @@ function click_related_entry_item(e) {
 // Function add related entry to wiki document table
 function add_related_entry() {
     $('#related-entry-dst-list div').each(function() {
-        let key = $(this).html();
+        let name = $(this).html();
         let url = $(this).attr("url");
-        if (!window.table_wiki_list.includes(url)) {
-            window.table_wiki_list.push(url);
-            $("#wiki-table-body").append(create_wiki_table_row({ name: key, url: url }, 1));
-        }
+        let node = window.corpus_tree.access_child_with_full_position(window.table_wiki_target);
+        if (!window.table_wiki_list.includes(url))
+            node.add_child(name, url);
     });
+    refresh_wiki_table();
     $.unblockUI();
 }
 
@@ -166,8 +152,10 @@ function create_related_entry_dialog(data) {
     $(lst_wrap).append(dst_lst);
     $(dialog).append(lst_wrap);
     // add query result to src list
-    for (let key in data) {
-        if(!data.hasOwnProperty(key))
+    let sorted_keys = Object.keys(data).sort();
+    for (let idx in sorted_keys) {
+        let key = sorted_keys[idx];
+        if (!data.hasOwnProperty(key))
             continue;
         $(src_lst).append(elementFactory({
             type: "div",
@@ -209,19 +197,17 @@ function create_related_entry_dialog(data) {
 
     $.blockUI({
         message: $(dialog),
-        css: { width: "450px", height: "330px", top: 'calc(50% - 165px)', left: 'calc(50% - 225px)', cursor: 'auto' }
+        css: { width: "550px", height: "330px", top: 'calc(50% - 165px)', left: 'calc(50% - 275px)', cursor: 'auto' }
     });
 }
 
 // Function : related entry button click function
 function click_related_entry_btn(e) {
-    let key = $(e.data.target).attr("key");
-    let url = $("#" + key).attr("url");
-
-    // disabled
     if ($(e.data.target).hasClass("disabled"))
         return;
-
+    let row = $("#" + ($(e.data.target).attr("key")));
+    let url = $(row).attr("url");
+    window.table_wiki_target = $(row).attr("pos");
     $.blockUI({ message: "正在取得相關條目..." });
     window.get_all_links(url, function(result) {
         if (result.status) {
@@ -233,10 +219,49 @@ function click_related_entry_btn(e) {
     });
 }
 
+// Function : recursively add entry
+function recursive_add(key) {
+    let pattern = new RegExp('https:\\/\\/((.*\\/)+wiki\\/)([^#]+)(#.*)*');
+    let row = $("#" + key);
+    let url = $(row).attr("url");
+    let pos = $(row).attr("pos");
+    let name = decodeURIComponent(pattern.exec(url)[3]).replace(/_/g, ' ');
+    let node = window.corpus_tree.access_child_with_full_position(pos);
+    $("#entire_book_sub_book_name").html(name);
+    window.get_all_links(url, function(result) {
+        if (result.status) {
+            let sorted_keys = Object.keys(result.data).sort();
+            for (let idx in sorted_keys) {
+                let key = sorted_keys[idx];
+                if (!result.data.hasOwnProperty(key))
+                    continue;
+                if ((key.indexOf(name) !== -1) && (!window.table_wiki_list.includes(result.data[key]))) {
+                    window.entire_book_check_queue.push(hash(result.data[key]));
+                    node.add_child(key, result.data[key]);
+                }
+            }
+            refresh_wiki_table();
+            window.entire_book_check_queue.shift();
+            if (window.entire_book_check_queue.length !== 0)
+                recursive_add(window.entire_book_check_queue[0]);
+            else
+                $.unblockUI();
+        }
+    });
+}
+
+// Function : add entire book button click function
+function click_add_entire_book_btn(e) {
+    if ($(e.data.target).hasClass("disabled"))
+        return;
+    window.entire_book_check_queue = [$(e.data.target).attr("key")];
+    $.blockUI({ message: "正在取得「<span id='entire_book_sub_book_name'></span>」下的目錄..." });
+    recursive_add($(e.data.target).attr("key"));
+}
+
 // Function : copy link button click function
 function click_copy_link_btn(e) {
-    let key = $(e.data.target).attr("key");
-    let url = $("#" + key).attr("url");
+    let url = $("#" + ($(e.data.target).attr("key"))).attr("url");
     let tmp = elementFactory({
         type: "textarea",
         attr: { readonly: "" },
@@ -257,53 +282,52 @@ function click_copy_link_btn(e) {
 
 // Function : error message button click function
 function click_error_message_btn(e) {
-    let key = $(e.data.target).attr("key");
-    let msg = $("#" + key).attr("msg");
+    let msg = $("#" + ($(e.data.target).attr("key"))).attr("msg");
     $.blockUI({ message: msg });
     setTimeout($.unblockUI, 3000);
     $('.blockOverlay').click($.unblockUI);
 }
 
 // Function : create new row in wiki document table
-function create_wiki_table_row(wiki_doc, state) {
+function create_wiki_table_row(data) {
     let pattern = new RegExp('https:\\/\\/((.*\\/)+wiki\\/)([^#]+)(#.*)*');
-    let key = hash(wiki_doc.url);
-    let src = pattern.exec(wiki_doc.url)[1];
-    let entry = (wiki_doc.name !== null) ? wiki_doc.name : decodeURIComponent(pattern.exec(wiki_doc.url)[3]);
+    let key = hash(data.url);
+    let src = pattern.exec(data.url)[1];
+    let entry = (data.name !== null) ? data.name : decodeURIComponent(pattern.exec(data.url)[3]);
     let cell, btn;
-    let icon_type = ["ok", "hourglass"];
-    let icon_color = ["green", "black"];
+    let icon_type = ["ok", "hourglass", "hourglass", "hourglass", "remove"];
+    let icon_color = ["green", "black", "black", "black", "red"];
 
     // config row
     let row = elementFactory({
         type: "tr",
-        attr: { id: key, url: wiki_doc.url, status: state.toString() },
-        css: { 'text-decoration-line': "none" }
+        attr: { id: key, url: data.url, pos: data.pos, state: data.state.toString(), msg: data.msg },
+        css: { 'text-decoration-line': (((data.state === 2) || (data.state === 3)) ? " line-through" : "none") }
     });
 
     // status
-    cell = elementFactory({ type: "td", css: { 'text-align': "center" } });
+    cell = elementFactory({ type: "td", css: { width: "50px",'text-align': "center" } });
     $(cell).append(elementFactory({
         type: "span",
-        class: "glyphicon glyphicon-" + icon_type[state],
-        css: { color: icon_color[state] }
+        class: "glyphicon glyphicon-" + icon_type[data.state],
+        css: { color: icon_color[data.state] }
     }));
     $(row).append(cell);
 
     // source
-    $(row).append(elementFactory({ type: "td", css: { 'text-align': "left" }, html: src }));
+    $(row).append(elementFactory({ type: "td", css: { width: "200px", 'text-align': "left" }, html: src }));
 
     // entry
     $(row).append(elementFactory({ type: "td", css: { 'text-align': "left" }, html: entry }));
 
     // button
-    cell = elementFactory({ type: "td", class: "select-disable", css: { 'text-align': "left" } });
+    cell = elementFactory({ type: "td", class: "select-disable", css: { width: "150px", 'text-align': "left" } });
     $(row).append(cell);
     // delete button
     btn = elementFactory({
         type: "div",
         attr: { key: key, title: "刪除此條目" },
-        class: "table-tool-btn",
+        class: "table-tool-btn" + ((data.state === 4) ? " disabled" : ""),
         on: { click: click_delete_btn }
     });
     $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-trash" }));
@@ -312,10 +336,19 @@ function create_wiki_table_row(wiki_doc, state) {
     btn = elementFactory({
         type: "div",
         attr: { key: key, title: "增加相關條目" },
-        class: "table-tool-btn",
+        class: "table-tool-btn" + ((data.state === 4) ? " disabled" : ""),
         on: { click: click_related_entry_btn }
     });
     $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-list-alt" }));
+    $(cell).append(btn);
+    // add entire book button
+    btn = elementFactory({
+        type: "div",
+        attr: { key: key, title: "加入整本文獻" },
+        class: "table-tool-btn" + ((data.state === 4) ? " disabled" : ""),
+        on: { click: click_add_entire_book_btn }
+    });
+    $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-book" }));
     $(cell).append(btn);
     // copy link button
     btn = elementFactory({
@@ -331,7 +364,7 @@ function create_wiki_table_row(wiki_doc, state) {
         type: "div",
         attr: { key: key, title: "查看錯誤訊息" },
         class: "table-tool-btn",
-        css: { display: "none" },
+        css: { display: ((data.state === 4) ? " inline-block" : "none") },
         on: { click: click_error_message_btn }
     });
     $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-exclamation-sign" }));
@@ -343,8 +376,9 @@ function create_wiki_table_row(wiki_doc, state) {
 // Function : new wiki click function
 function click_new_wiki() {
     let text = $("#new-wiki-url");
-    let url = $(text).val();
-    let pattern = new RegExp('(https:\\/\\/((.*\\/)+wiki\\/)([^#]+))(#.*)*');
+    let url = confirm_decode($(text).val());
+    let name;
+    let pattern = new RegExp('((https:\\/\\/((.*\\/)+wiki\\/))([^#]+))(#.*)*');
     if (url.length === 0)
         return;
     if (pattern.exec(url) === null) {
@@ -352,110 +386,44 @@ function click_new_wiki() {
         $(text).val("");
         return;
     } else {
-        url = pattern.exec(url)[1];
+        name = pattern.exec(url)[5];
+        url = pattern.exec(url)[2] + encodeURIComponent(name);
     }
     if (window.table_wiki_list.includes(url)) {
         window.alert("重複的網址！");
         $(text).val("");
         return;
     }
-    window.table_wiki_list.push(url);
-    $("#wiki-table-body").append(create_wiki_table_row({ name: null, url: url }, 1));
+    window.corpus_tree.add_child(name, url);
+    refresh_wiki_table();
     $(text).val("");
 }
 
-// Function : create new operate space for clicked corpus item
-function create_corpus_operate(name) {
-    // config url bar
-    let url_input_group = elementFactory({ type: "div", class: "input-group col-md-8 col-md-offset-2" });
-    $(url_input_group).append(elementFactory({
-        type: "span",
-        class: "input-group-addon select-disable",
-        html: "維基百科網址"
-    }));
-    $(url_input_group).append(elementFactory({
-        type: "input",
-        attr: { id: "new-wiki-url", placeholder: "請貼上維基百科網址" },
-        class: "form-control input-group-text"
-    }));
-    $(url_input_group).append(elementFactory({
-        type: "span",
-        attr: { id: "new-wiki" },
-        class: "input-group-addon select-disable span-btn",
-        html: "新增",
-        on: { click: click_new_wiki }
-    }));
-
-    // config wiki document table
-    let table_container = elementFactory({ type: "div", class: "col-md-10 col-md-offset-1" });
-    let table = elementFactory({ type: "table", class: "table table-striped" });
-    let thead = elementFactory({ type: "thead" });
-    let tbody = elementFactory({ type: "tbody", attr: { id: "wiki-table-body" } });
-    let row = elementFactory({ type: "tr" });
-    $(table_container).append(table);
-    $(table).append(thead);
-    $(table).append(tbody);
-    $(thead).append(row);
-    $(row).append(elementFactory({
-        type: "th",
-        css: { width: "50px", 'text-align': "center" },
-        html: "狀態"
-    }));
-    $(row).append(elementFactory({
-        type: "th",
-        css: { width: "200px" },
-        html: "來源"
-    }));
-    $(row).append(elementFactory({
-        type: "th",
-        html: "條目"
-    }));
-    $(row).append(elementFactory({
-        type: "th",
-        css: { width: "125px" },
-        html: "按鈕"
-    }));
-
-    // add row to wiki document table body
-    let wiki_list = window.handler.get_wiki_list(name);
-    window.table_wiki_list = [];
-    for (let key in wiki_list) {
-        if (!wiki_list.hasOwnProperty(key))
+// Function : refresh wiki document table
+function refresh_wiki_table() {
+    let row_list = window.corpus_tree.toArray();
+    let tbody = $("#wiki-table-body");
+    window.table_wiki_list = row_list.map(function(val) {
+        return val.url;
+    });
+    $(tbody).html("");
+    for (let idx in row_list) {
+        if (!row_list.hasOwnProperty(idx))
             continue;
-        window.table_wiki_list.push(wiki_list[key].url);
-        $(tbody).append(create_wiki_table_row(wiki_list[key], 0));
+        $(tbody).append(create_wiki_table_row(row_list[idx]));
     }
-
-    // clear space and append element
-    let space = $("#operate-space");
-    $(space).html("");
-    $(space).append(elementFactory({ type: "h2", html: "文獻集：" + name }));
-    $(space).append(url_input_group);
-    $(space).append(table_container);
 }
 
-// Function : update wiki document table with query result
-function update_wiki_table_row(key, result) {
-    let row = $("#" + key);
-    let span = $("#" + key + " td:nth-child(1) span")[0];
-    let del_btn = $("#" + key + " td:nth-child(4) div:nth-child(1)")[0];
-    let rel_btn = $("#" + key + " td:nth-child(4) div:nth-child(2)")[0];
-    let msg_btn = $("#" + key + " td:nth-child(4) div:nth-child(4)")[0];
-    if (result.status) {
-        $(row).attr("status", "0");
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-ok");
-        $(span).css("color", "green");
-    } else {
-        $(row).attr("status", "4");
-        $(row).attr("msg", result.data);
-        $(del_btn).addClass("disabled");
-        $(rel_btn).addClass("disabled");
-        $(msg_btn).css("display", "inline-block");
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-remove");
-        $(span).css("color", "red");
-    }
+// Function : create new operate space for clicked corpus item
+function load_corpus_content() {
+    $("#corpus-operate-title").html("文獻集：" + window.corpus_target);
+    $("#corpus-operate-url_input-container").show();
+    $("#corpus-operate-wiki_table-container").show();
+
+    // create corpus tree and load corpus content
+    let wiki_list = window.handler.get_wiki_list(window.corpus_target);
+    window.corpus_tree = new corpusTreeRoot(wiki_list);
+    refresh_wiki_table();
 }
 
 // Function : wiki query progress callback function
@@ -471,38 +439,51 @@ function wiki_result_callback(result) {
     for (let idx in result) {
         if (!result.hasOwnProperty(idx))
             continue;
-        if (result[idx].status)
-            window.handler.add_document({ name: $(window.corpus_target).html(), document: result[idx].data });
-        update_wiki_table_row(hash(result[idx].url), result[idx]);
+        let pos = $("#" + hash(result[idx].url)).attr("pos");
+        let node = window.corpus_tree.access_child_with_full_position(pos);
+        if (result[idx].status) {
+            node.set_state(0);
+            result[idx].data.wiki_metadata.position = pos;
+            window.handler.add_document({ name: window.corpus_target, document: result[idx].data });
+        } else {
+            node.set_state(4);
+            node.set_message(result[idx].data);
+        }
     }
+    refresh_wiki_table();
     $.unblockUI();
 }
 
 // Event : sync with docuXML
 $("#synchronize").click(function() {
     $("#synchronize").blur();
-    let name = $(window.corpus_target).html();
-    let urls = [];
+    if (window.corpus_target === null)
+        return;
     $.blockUI({
         message: "已取得維基頁面&nbsp;...&nbsp;<span id='numerator'>0</span>&nbsp;/&nbsp;<span id='denominator'></span>"
     });
-    window.table_wiki_list = [];
-    $('#wiki-table-body tr').each(function() {
-        let st = $(this).attr("status");
-        if (st === "0" || st === "1") {
-            window.table_wiki_list.push($(this).attr("url"));
-            urls.push($(this).attr("url"));
-        } else {
-            $(this).remove();
-        }
-    });
-    urls = window.handler.check_necessary_url(name, urls);
+    window.corpus_tree.clean_tree();
+    refresh_wiki_table();
+    let urls = window.handler.check_necessary_url(window.corpus_target, window.table_wiki_list);
     if (urls.length !== 0) {
         $("#denominator").html(urls.length.toString());
         window.get_URL(urls, progress_callback, wiki_result_callback);
     } else {
         $.unblockUI();
     }
+});
+
+// Event : clear changes of the corpus
+$("#clear_corpus_change").click(function() {
+    $("#clear_corpus_change").blur();
+    if (window.corpus_target === null)
+        return;
+    let content = "文獻集將回復至上一次更新後的狀態<br>在那之後所做的變更將不被保留<br>確認清除變更？<br>";
+    check_sync(content, "確認", "取消", function(sync) {
+        if (sync) {
+            load_corpus_content();
+        }
+    });
 });
 
 // Event : back to main page
@@ -538,15 +519,15 @@ $("#download").click(function() {
 // Function : corpus item click function
 function click_corpus_item(e) {
     let self = e.data.target;
-    if ($(self).html() === $(window.corpus_target).html())
+    if ($(self).html() === window.corpus_target)
         return;
     let content = "目前文獻集有條目尚未更新至 docuXML<br>若是切換文獻集則本工具將不會保留該條目<br>是否要切換文獻集？<br>";
     check_sync(content, "確定切換", "取消切換", function(sync) {
         if (sync) {
             $(".corpus-item").removeClass("active");
             $(self).addClass("active");
-            window.corpus_target = $(self);
-            create_corpus_operate($(self).html());
+            window.corpus_target = $(self).html();
+            load_corpus_content();
         }
     });
 }
@@ -556,9 +537,9 @@ function create_corpus_item(name) {
     let corpus_item = elementFactory({
         type: "div",
         class: "corpus-item select-disable",
-        html: name
+        html: name,
+        on: { click: click_corpus_item }
     });
-    $(corpus_item).on('click', { target: corpus_item }, click_corpus_item);
     $("#corpus-list").append(corpus_item);
     if (window.corpus_list.length === 1) {
         $(corpus_item).click();
@@ -584,6 +565,7 @@ $("#new-corpus").click(function() {
 
 $(document).ready(function() {
     window_variable_initial();
+    $("#new-wiki").on("click", click_new_wiki);
     if (window.handler !== null) {
         window.corpus_list = window.handler.get_corpus_list();
         if (window.corpus_list.length !== 0) {

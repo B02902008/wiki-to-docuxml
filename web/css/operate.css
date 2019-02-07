@@ -22,7 +22,7 @@
     text-align: center;
 }
 .no-rounded {
-    border-radius: 0px;
+    border-radius: 0;
 }
 .corpus-item {
     width: 100%;
@@ -53,6 +53,23 @@
     text-align: center;
     overflow: auto;
 }
+#corpus-operate-wiki_table-container {
+    height: calc(100% - 120px);
+}
+#wiki-table {
+    height: 100%;
+}
+#wiki-table-body {
+    display: block;
+    height: calc(100% - 50px);
+    overflow-x: hidden;
+    overflow-y: overlay;
+}
+#wiki-table-head, #wiki-table-body tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
 .table-tool-btn {
     background: #fff;
     border-radius: 5px;
@@ -73,7 +90,7 @@
 }
 .dialog-list {
     border: 1px solid black;
-    width: 150px;
+    width: 200px;
     height:250px;
     text-align: left;
     vertical-align: top;
@@ -106,8 +123,7 @@
 }
 #arrow-head-r {
     width:0;
-    border-width: 10px;
-    border-style: solid;
+    border: 10px solid;
     border-color: transparent transparent transparent #000;
     display: inline-block;
     margin: 0;
@@ -123,16 +139,14 @@
 }
 #arrow-tail-r {
     width: 0;
-    border-width: 10px;
-    border-style: solid;
+    border: 10px solid;
     border-color: #000 #000 #000 transparent;
     display: inline-block;
     margin: 0;
 }
 #arrow-head-l {
     width:0;
-    border-width: 10px;
-    border-style: solid;
+    border: 10px solid;
     border-color: transparent #000 transparent transparent;
     display: inline-block;
     margin: 0;
@@ -148,8 +162,7 @@
 }
 #arrow-tail-l {
     width: 0;
-    border-width: 10px;
-    border-style: solid;
+    border: 10px solid;
     border-color: #000 transparent #000 #000;
     display: inline-block;
     margin: 0;

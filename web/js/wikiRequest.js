@@ -1,4 +1,4 @@
-var worker;
+let worker;
 
 function get_URL(urls, progress_update_callback, result_callback) {
 	/*
@@ -39,16 +39,16 @@ function get_URL(urls, progress_update_callback, result_callback) {
 		return {"status": "error", "data": "Web Worker not supported by browser."};
 	}
 
-	// Preprocess
+	// Pre-process
 	function unique(value, index, self) {return self.indexOf(value) === index;}
 	urls = urls.filter(unique);
-	var queried_url = 0;
-	var total_length = urls.length;
-	var result_data = new Array(total_length);
+	let queried_url = 0;
+	let total_length = urls.length;
+	let result_data = new Array(total_length);
 	function insert_result(data) {result_data[urls.indexOf(data.url)] = data;}
 
 	// Create Worker if not exist.
-	if (typeof(worker) != "undefined") {
+	if (typeof(worker) !== "undefined") {
 		return {"url":null, "status": false, "data": "worker busy, try later"};
 	}
 	worker = new Worker("js/getWikiPageApi.js");
@@ -57,21 +57,21 @@ function get_URL(urls, progress_update_callback, result_callback) {
 	worker.onmessage = function(event) {
 		if (event.data.status) {
 			// parse return value
-			var re = event.data.data;
+			let re = event.data.data;
 			// parse page as DOM object
-			var tmp = JSON.parse(re);
+			let tmp = JSON.parse(re);
 			tmp = tmp.query.pages;
-			if (Object.keys(tmp).length == 0) {
-				console.log("Query success but contains no page.");
+			if (Object.keys(tmp).length === 0) {
+				//console.log("Query success but contains no page.");
 				insert_result({"url": event.data.url, "status": false, "data": "Query success but no page content."});
 			}
-			for (var page_id in tmp) {
-				if (page_id == -1) {
+			for (let page_id in tmp) {
+				if (page_id === "-1") {
 					insert_result({"url": event.data.url, "status": false, "data": "Wiki page with such title does not exists."});
 					break;
 				}
-				var page = tmp[page_id];
-				var data = {"url": event.data.url, "status": true, "data": {"wiki_metadata": {}}};
+				let page = tmp[page_id];
+				let data = {"url": event.data.url, "status": true, "data": {"wiki_metadata": {}}};
 				data.data.filename = page.title;
 				data.data.wiki_metadata.url = event.data.url;
 				data.data.wiki_metadata.page_id = page.pageid;
@@ -83,7 +83,7 @@ function get_URL(urls, progress_update_callback, result_callback) {
 			insert_result({"url": event.data.url, "status": false, "data": event.data.data});
 		}
 		progress_update_callback(++queried_url);
-		if (queried_url == total_length) { // all finished
+		if (queried_url === total_length) { // all finished
 			stop_worker();
 			result_callback(result_data);
 		}
@@ -130,7 +130,7 @@ function get_all_links(url, result_callback, result_data, con_str) {
 	}
 
 	// Create Worker if not exist.
-	if (typeof(worker) != "undefined") {
+	if (typeof(worker) !== "undefined") {
 		return {"url":null, "status": false, "data": "worker busy, try later"};
 	}
 	worker = new Worker("js/getWikiLinkApi.js");
@@ -144,29 +144,28 @@ function get_all_links(url, result_callback, result_data, con_str) {
 				return '';
 		}
 		// set states
-		if ((result_data && result_data.url != url) || !result_data)
+		if ((result_data && result_data.url !== url) || !result_data)
 			result_data = {"url": event.data.url, "status": true, "data": {}};
 		con_str = '';
 		if (event.data.status) {
 			// parse return value
-			var re = event.data.data;
+			let re = event.data.data;
 			// parse the links and put into dictionary
-			var tmp_all = JSON.parse(re);
+			let tmp_all = JSON.parse(re);
 			if (! ('query' in tmp_all && 'pages' in tmp_all.query)) { // handle title error
 				tmp_all.query = {'pages': []};
 			}
-			var tmp = tmp_all.query.pages;
-			if (Object.keys(tmp).length == 0) {
-				console.log("No relative link found.");
+			let tmp = tmp_all.query.pages;
+			if (Object.keys(tmp).length === 0) {
+				//console.log("No relative link found.");
 				result_data.status = false;
 				result_data.data = "Title incorrect or page not exist.";
 			}
-			for (var page_id in tmp) { // place all the links into return data
-				if (page_id == -1)
+			for (let page_id in tmp) { // place all the links into return data
+				if (parseInt(page_id) < 0)
 					continue;
-				var link = tmp[page_id];
-				var furl = link.fullurl;
-				var title = get_title_from_url(furl);
+				let furl = tmp[page_id].fullurl;
+				let title = tmp[page_id].title;
 				title = title.replace(/_/g, ' '); // replace underscore in url to actual space
 				result_data.data[title] = furl;
 			}
@@ -177,7 +176,7 @@ function get_all_links(url, result_callback, result_data, con_str) {
 			result_data.data = event.data.data;
 		}
 		stop_worker();
-		if (con_str == '' || result_data.status == false) // query finished, do callback
+		if (con_str === '' || result_data.status === false) // query finished, do callback
 			result_callback(result_data);
 		else // need continue, recursive call
 			get_all_links(url, result_callback, result_data, con_str);
