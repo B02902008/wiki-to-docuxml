@@ -1,8 +1,11 @@
 // Function : initial window variable
 function window_variable_initial() {
     window.corpus_list = null;
+    window.corpus_tree = null;
     window.corpus_target = null;
     window.table_wiki_list = null;
+    window.table_wiki_target = null;
+    window.entire_book_check_queue = null;
 }
 
 //Function : hash function
@@ -13,224 +16,198 @@ function hash(s) {
     return (h ^ h >>> 17) >>> 0;
 }
 
+// Function : create and config DOM element
+function elementFactory(data) {
+    if (!data.hasOwnProperty("type"))
+        return null;
+    let el = document.createElement(data.type);
+    if (data.hasOwnProperty("class"))
+        $(el).addClass(data.class);
+    if (data.hasOwnProperty("html"))
+        $(el).html(data.html);
+    if (data.hasOwnProperty("css"))
+        $(el).css(data.css);
+    if (data.hasOwnProperty("attr")) {
+        for (let key in data.attr) {
+            if (!data.attr.hasOwnProperty(key))
+                continue;
+            $(el).attr(key, data.attr[key]);
+        }
+    }
+    if (data.hasOwnProperty("on")) {
+        for (let key in data.on) {
+            if (!data.on.hasOwnProperty(key))
+                continue;
+            $(el).on(key, { target: el }, data.on[key]);
+        }
+    }
+    return el;
+}
+
+// Function : make sure url is decoded
+function confirm_decode(s) {
+    let ss = decodeURIComponent(s);
+    return (s === ss) ? s : ss;
+}
+
 // Function : check synchronize between wiki document table and docuXML
 function check_sync(content, btn_y, btn_n, callback) {
     let sync = true;
     $('#wiki-table-body tr').each(function() {
-        let st = $(this).attr("status");
+        let st = $(this).attr("state");
         if (st !== "0" && st !== "4")
             sync = false;
     });
     if (!sync) {
-        let dialog = document.createElement("div");
-        let tmp;
-        $(dialog).html(content);
-        tmp = document.createElement("button");
-        $(tmp).addClass("btn btn-default btn-xs");
-        $(tmp).attr("id", "no");
-        $(tmp).css("margin", "10px 20px 0 0");
-        $(tmp).html(btn_n);
-        $(dialog).append(tmp);
-        tmp = document.createElement("button");
-        $(tmp).addClass("btn btn-default btn-xs");
-        $(tmp).attr("id", "yes");
-        $(tmp).css("margin", "10px 0 0 20px");
-        $(tmp).html(btn_y);
-        $(dialog).append(tmp);
+        let dialog = elementFactory({ type: "div", html: content });
+        // no button
+        $(dialog).append(elementFactory({
+            type: "button",
+            class: "btn btn-default btn-xs",
+            css: { margin: "10px 20px 0 0" },
+            html: btn_n,
+            on: { click: function() { $.unblockUI(); callback(false); } }
+        }));
+        // yes button
+        $(dialog).append(elementFactory({
+            type: "button",
+            class: "btn btn-default btn-xs",
+            css: { margin: "10px 0 0 20px" },
+            html: btn_y,
+            on: { click: function() { $.unblockUI(); callback(true); } }
+        }));
         $.blockUI({
             message: $(dialog),
-            css: { width: '300px', height: '120px', padding: '10px 0 0 0' }
+            css: { width: '300px', height: '120px', top: 'calc(50% - 60px)', left: 'calc(50% - 150px)', padding: '10px 0 0 0' }
         });
-        $("#yes").click(function() {$.unblockUI(); callback(true);});
-        $("#no").click(function() {$.unblockUI(); callback(false);});
     } else {
         callback(true);
     }
 }
 
 // Function : delete button click function
-function click_delete(e) {
-    let key = $(e.data.target).attr("key");
-    let row = $("#" + key);
-    let span = $("#" + key + " td:nth-child(1) span")[0];
-
-    // disabled
+function click_delete_btn(e) {
     if ($(e.data.target).hasClass("disabled"))
         return;
-
-    // delete line
-    if ($(row).css("text-decoration-line") === "none")
-        $(row).css("text-decoration-line", "line-through");
-    else
-        $(row).css("text-decoration-line", "none");
-
-    // row status
-    switch ($(row).attr("status")) {
-        case "0":
-            $(row).attr("status", "2");
-            break;
-        case "1":
-            $(row).attr("status", "3");
-            break;
-        case "2":
-            $(row).attr("status", "0");
-            break;
-        case "3":
-            $(row).attr("status", "1");
-            break;
-        default:
-            break;
-    }
-
-    // status sign
-    if ($(row).attr("status") === "0") {
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-ok");
-        $(span).css("color", "green");
-    } else if ($(row).attr("status") !== "4") {
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-hourglass");
-        $(span).css("color", "black");
-    }
+    let row = $("#" + ($(e.data.target).attr("key")));
+    let node = window.corpus_tree.access_child_with_full_position($(row).attr("pos"));
+    node.set_state((parseInt($(row).attr("state")) + 2) % 4);
+    refresh_wiki_table();
 }
 
 // Function : related entry item click function
-function click_related_entry(e) {
+function click_related_entry_item(e) {
     let self = e.data.target;
-    let key = $(self).html();
+    let name = $(self).attr("title");
     let url = $(self).attr("url");
-    let tmp = document.createElement("div");
-    $(tmp).addClass("related-entry-item");
-    $(tmp).attr("url", url);
-    $(tmp).attr("title", key);
-    $(tmp).html(key);
-    if ($(self).hasClass("src-item")) {
-        $(self).remove();
-        $(tmp).addClass("dst-item");
-        $(tmp).on('click', {target: tmp}, click_related_entry);
-        $("#related-entry-dst-list").append(tmp);
-    } else if ($(self).hasClass("dst-item")) {
-        $(self).remove();
-        $(tmp).addClass("src-item");
-        $("#related-entry-src-list").append(tmp);
-        $(tmp).on('click', {target: tmp}, click_related_entry);
-    }
+    let parent;
+    if ($(self).parent().attr("id") === "related-entry-src-list")
+        parent = $("#related-entry-dst-list");
+    else
+        parent = $("#related-entry-src-list");
+    $(self).remove();
+    $(parent).append(elementFactory({
+        type: "div",
+        attr: { url: url, title: name },
+        class: "related-entry-item select-disable",
+        html: name,
+        on: { click: click_related_entry_item }
+    }));
 }
 
 // Function add related entry to wiki document table
 function add_related_entry() {
     $('#related-entry-dst-list div').each(function() {
-        let key = $(this).html();
+        let name = $(this).html();
         let url = $(this).attr("url");
-        if (!window.table_wiki_list.includes(url)) {
-            window.table_wiki_list.push(url);
-            $("#wiki-table-body").append(create_wiki_table_row({name: key, url: url}, 1));
-        }
+        let node = window.corpus_tree.access_child_with_full_position(window.table_wiki_target);
+        if (!window.table_wiki_list.includes(url))
+            node.add_child(name, url);
     });
+    refresh_wiki_table();
     $.unblockUI();
 }
 
 // Function : create block ui dialog for related entry
 function create_related_entry_dialog(data) {
-    let dialog = document.createElement("div");
-    let lst_wrap = document.createElement("div");
-    let src_lst = document.createElement("div");
-    let dst_lst = document.createElement("div");
-    let arrow_wrap = document.createElement("div");
-    let arrow_r = document.createElement("div");
-    let arrow_l = document.createElement("div");
-    let btn_wrap = document.createElement("div");
-    let tmp;
+    let dialog = elementFactory({ type: "div" });
+    let lst_wrap = elementFactory({ type: "div", css: { margin: "5px 0 5px 0" } });
+    let src_lst = elementFactory({ type: "div", attr: { id: "related-entry-src-list" }, class: "dialog-list" });
+    let dst_lst = elementFactory({ type: "div", attr: { id: "related-entry-dst-list" }, class: "dialog-list" });
+    let arrow_wrap = elementFactory({ type: "div", attr: { id: "arrow-container" } });
+    let arrow_r = elementFactory({ type: "div", attr: { id: "arrow-wrap-r" }, class: "select-disable" });
+    let arrow_l = elementFactory({ type: "div", attr: { id: "arrow-wrap-l" }, class: "select-disable" });
+    let btn_wrap = elementFactory({ type: "div", css: { margin: "5px 0 5px 0" } });
 
     // query result show
-    tmp = document.createElement("div");
-    $(tmp).html("找到 " + Object.keys(data).length + " 個相關條目");
-    $(tmp).css("margin", "5px 0 5px 0");
-    $(dialog).append(tmp);
+    $(dialog).append(elementFactory({
+        type: "div",
+        css: { margin: "5px 0 5px 0" },
+        html: "找到 " + Object.keys(data).length + " 個相關條目"
+    }));
 
-    // query result src and dst list
-    $(lst_wrap).css("margin", "5px 0 5px 0");
-    $(src_lst).attr("id", "related-entry-src-list");
-    $(src_lst).addClass("dialog-list");
+    // append wrapper for two list and arrow
     $(lst_wrap).append(src_lst);
-    $(arrow_wrap).attr("id", "arrow-container");
     $(lst_wrap).append(arrow_wrap);
-    $(dst_lst).attr("id", "related-entry-dst-list");
-    $(dst_lst).addClass("dialog-list");
     $(lst_wrap).append(dst_lst);
     $(dialog).append(lst_wrap);
-
     // add query result to src list
-    for (let key in data) {
-        if(!data.hasOwnProperty(key))
+    let sorted_keys = Object.keys(data).sort();
+    for (let idx in sorted_keys) {
+        let key = sorted_keys[idx];
+        if (!data.hasOwnProperty(key))
             continue;
-        tmp = document.createElement("div");
-        $(tmp).addClass("related-entry-item src-item");
-        $(tmp).attr("url", data[key]);
-        $(tmp).attr("title", decodeURIComponent(key));
-        $(tmp).html(decodeURIComponent(key));
-        $(tmp).on('click', {target: tmp}, click_related_entry);
-        $(src_lst).append(tmp);
+        $(src_lst).append(elementFactory({
+            type: "div",
+            attr: { url: data[key], title: decodeURIComponent(key) },
+            class: "related-entry-item select-disable",
+            html: decodeURIComponent(key),
+            on: { click: click_related_entry_item }
+        }));
     }
-
     // arrow right
-    $(arrow_r).attr("id", "arrow-wrap-r");
-    $(arrow_r).addClass("select-disable");
-    tmp = document.createElement("div");
-    $(tmp).attr("id", "arrow-tail-r");
-    $(arrow_r).append(tmp);
-    tmp = document.createElement("div");
-    $(tmp).attr("id", "arrow-body-r");
-    $(tmp).html("加入");
-    $(arrow_r).append(tmp);
-    tmp = document.createElement("div");
-    $(tmp).attr("id", "arrow-head-r");
-    $(arrow_r).append(tmp);
+    $(arrow_r).append(elementFactory({ type: "div", attr: { id: "arrow-tail-r" } }));
+    $(arrow_r).append(elementFactory({ type: "div", attr: { id: "arrow-body-r" }, html: "加入" }));
+    $(arrow_r).append(elementFactory({ type: "div", attr: { id: "arrow-head-r" } }));
     $(arrow_wrap).append(arrow_r);
-
     // arrow left
-    $(arrow_l).attr("id", "arrow-wrap-l");
-    $(arrow_l).addClass("select-disable");
-    tmp = document.createElement("div");
-    $(tmp).attr("id", "arrow-head-l");
-    $(arrow_l).append(tmp);
-    tmp = document.createElement("div");
-    $(tmp).attr("id", "arrow-body-l");
-    $(tmp).html("刪去");
-    $(arrow_l).append(tmp);
-    tmp = document.createElement("div");
-    $(tmp).attr("id", "arrow-tail-l");
-    $(arrow_l).append(tmp);
+    $(arrow_l).append(elementFactory({ type: "div", attr: { id: "arrow-head-l" } }));
+    $(arrow_l).append(elementFactory({ type: "div", attr: { id: "arrow-body-l" }, html: "刪去" }));
+    $(arrow_l).append(elementFactory({ type: "div", attr: { id: "arrow-tail-l" } }));
     $(arrow_wrap).append(arrow_l);
 
     // query result add and cancel button
-    $(btn_wrap).css("margin", "5px 0 5px 0");
-    tmp = document.createElement("button");
-    $(tmp).addClass("btn btn-default btn-xs");
-    $(tmp).attr("id", "related-entry-dialog-cancel");
-    $(tmp).css("margin", "0 20px 0 0");
-    $(tmp).html("取消");
-    $(btn_wrap).append(tmp);
-    tmp = document.createElement("button");
-    $(tmp).addClass("btn btn-default btn-xs");
-    $(tmp).attr("id", "related-entry-dialog-add");
-    $(tmp).css("margin", "0 0 0 20px");
-    $(tmp).html("加入");
-    $(btn_wrap).append(tmp);
+    $(btn_wrap).append(elementFactory({
+        type: "button",
+        attr: { id: "related-entry-dialog-cancel" },
+        class: "btn btn-default btn-xs",
+        css: { margin: "0 20px 0 0" },
+        html: "取消",
+        on: { click: $.unblockUI }
+    }));
+    $(btn_wrap).append(elementFactory({
+        type: "button",
+        attr: { id: "related-entry-dialog-add" },
+        class: "btn btn-default btn-xs",
+        css: { margin: "0 0 0 20px" },
+        html: "加入",
+        on: { click: add_related_entry }
+    }));
     $(dialog).append(btn_wrap);
 
     $.blockUI({
         message: $(dialog),
-        css: { width: "450px", height: "330px", top: 'calc(50% - 165px)', left: 'calc(50% - 225px)', cursor: 'auto' }
+        css: { width: "550px", height: "330px", top: 'calc(50% - 165px)', left: 'calc(50% - 275px)', cursor: 'auto' }
     });
-    $("#related-entry-dialog-add").click(add_related_entry);
-    $("#related-entry-dialog-cancel").click($.unblockUI);
 }
 
 // Function : related entry button click function
-function click_next_level(e) {
-    let key = $(e.data.target).attr("key");
-    let url = $("#" + key).attr("url");
+function click_related_entry_btn(e) {
+    if ($(e.data.target).hasClass("disabled"))
+        return;
+    let row = $("#" + ($(e.data.target).attr("key")));
+    let url = $(row).attr("url");
+    window.table_wiki_target = $(row).attr("pos");
     $.blockUI({ message: "正在取得相關條目..." });
     window.get_all_links(url, function(result) {
         if (result.status) {
@@ -242,14 +219,55 @@ function click_next_level(e) {
     });
 }
 
+// Function : recursively add entry
+function recursive_add(key) {
+    let pattern = new RegExp('https:\\/\\/((.*\\/)+wiki\\/)([^#]+)(#.*)*');
+    let row = $("#" + key);
+    let url = $(row).attr("url");
+    let pos = $(row).attr("pos");
+    let name = decodeURIComponent(pattern.exec(url)[3]).replace(/_/g, ' ');
+    let node = window.corpus_tree.access_child_with_full_position(pos);
+    $("#entire_book_sub_book_name").html(name);
+    window.get_all_links(url, function(result) {
+        if (result.status) {
+            let sorted_keys = Object.keys(result.data).sort();
+            for (let idx in sorted_keys) {
+                let key = sorted_keys[idx];
+                if (!result.data.hasOwnProperty(key))
+                    continue;
+                if ((key.indexOf(name) !== -1) && (!window.table_wiki_list.includes(result.data[key]))) {
+                    window.entire_book_check_queue.push(hash(result.data[key]));
+                    node.add_child(key, result.data[key]);
+                }
+            }
+            refresh_wiki_table();
+        }
+        window.entire_book_check_queue.shift();
+        if (window.entire_book_check_queue.length !== 0)
+            recursive_add(window.entire_book_check_queue[0]);
+        else
+            $.unblockUI();
+    });
+}
+
+// Function : add entire book button click function
+function click_add_entire_book_btn(e) {
+    if ($(e.data.target).hasClass("disabled"))
+        return;
+    window.entire_book_check_queue = [$(e.data.target).attr("key")];
+    $.blockUI({ message: "正在取得「<span id='entire_book_sub_book_name'></span>」下的目錄..." });
+    recursive_add($(e.data.target).attr("key"));
+}
+
 // Function : copy link button click function
-function click_copy_link(e) {
-    let key = $(e.data.target).attr("key");
-    let url = $("#" + key).attr("url");
-    let tmp = document.createElement('textarea');
+function click_copy_link_btn(e) {
+    let url = $("#" + ($(e.data.target).attr("key"))).attr("url");
+    let tmp = elementFactory({
+        type: "textarea",
+        attr: { readonly: "" },
+        css: { position: "absolute", left: "-9999px"}
+    });
     $(tmp).val(url);
-    $(tmp).attr("readonly", "");
-    $(tmp).css({"position": "absolute", "left": "-9999px"});
     document.body.appendChild(tmp);
     tmp.select();
     document.execCommand('copy');
@@ -263,109 +281,93 @@ function click_copy_link(e) {
 }
 
 // Function : error message button click function
-function click_error_message(e) {
-    let key = $(e.data.target).attr("key");
-    let msg = $("#" + key).attr("msg");
+function click_error_message_btn(e) {
+    let msg = $("#" + ($(e.data.target).attr("key"))).attr("msg");
     $.blockUI({ message: msg });
     setTimeout($.unblockUI, 3000);
     $('.blockOverlay').click($.unblockUI);
 }
 
 // Function : create new row in wiki document table
-function create_wiki_table_row(wiki_doc, state) {
+function create_wiki_table_row(data) {
     let pattern = new RegExp('https:\\/\\/((.*\\/)+wiki\\/)([^#]+)(#.*)*');
-    let src, entry, key;
-    let row = document.createElement("tr");
-    let cell, tmp, btn;
-    let icon = ["ok", "hourglass"];
-    let icon_color = ["green", "black"];
-
-    // decode wiki source and entry
-    if (wiki_doc.name !== null) {
-        src = pattern.exec(wiki_doc.url)[1];
-        entry = wiki_doc.name;
-    } else {
-        src = pattern.exec(wiki_doc.url)[1];
-        entry = decodeURIComponent(pattern.exec(wiki_doc.url)[3]);
-    }
+    let key = hash(data.url);
+    let src = pattern.exec(data.url)[1];
+    let entry = (data.name !== null) ? data.name : decodeURIComponent(pattern.exec(data.url)[3]);
+    let cell, btn;
+    let icon_type = ["ok", "hourglass", "hourglass", "hourglass", "remove"];
+    let icon_color = ["green", "black", "black", "black", "red"];
 
     // config row
-    key = hash(wiki_doc.url);
-    $(row).attr("id", key);
-    $(row).attr("url", wiki_doc.url);
-    $(row).attr("status", state.toString());
-    $(row).css("text-decoration-line", "none");
+    let row = elementFactory({
+        type: "tr",
+        attr: { id: key, url: data.url, pos: data.pos, state: data.state.toString(), msg: data.msg },
+        css: { 'text-decoration-line': (((data.state === 2) || (data.state === 3)) ? " line-through" : "none") }
+    });
 
     // status
-    cell = document.createElement("td");
-    $(cell).css("text-align", "center");
-    tmp = document.createElement("span");
-    $(tmp).addClass("glyphicon glyphicon-" + icon[state]);
-    $(tmp).css("color", icon_color[state]);
-    $(cell).append(tmp);
+    cell = elementFactory({ type: "td", css: { width: "50px",'text-align': "center" } });
+    $(cell).append(elementFactory({
+        type: "span",
+        class: "glyphicon glyphicon-" + icon_type[data.state],
+        css: { color: icon_color[data.state] }
+    }));
     $(row).append(cell);
 
     // source
-    cell = document.createElement("td");
-    $(cell).css("text-align", "left");
-    $(cell).html(src);
-    $(row).append(cell);
+    $(row).append(elementFactory({ type: "td", css: { width: "200px", 'text-align': "left" }, html: src }));
 
     // entry
-    cell = document.createElement("td");
-    $(cell).css("text-align", "left");
-    $(cell).html(entry);
-    $(row).append(cell);
+    $(row).append(elementFactory({ type: "td", css: { 'text-align': "left" }, html: entry }));
 
     // button
-    cell = document.createElement("td");
-    $(cell).addClass("select-disable");
-    $(cell).css("text-align", "left");
+    cell = elementFactory({ type: "td", class: "select-disable", css: { width: "150px", 'text-align': "left" } });
     $(row).append(cell);
-
     // delete button
-    btn = document.createElement("div");
-    $(btn).addClass("table-tool-btn");
-    $(btn).attr("key", key);
-    $(btn).attr("title", "刪除此條目");
-    $(btn).on('click', {target: btn}, click_delete);
-    tmp = document.createElement("span");
-    $(tmp).addClass("glyphicon glyphicon-trash");
-    $(btn).append(tmp);
+    btn = elementFactory({
+        type: "div",
+        attr: { key: key, title: "刪除此條目" },
+        class: "table-tool-btn" + ((data.state === 4) ? " disabled" : ""),
+        on: { click: click_delete_btn }
+    });
+    $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-trash" }));
     $(cell).append(btn);
-
     // related entry button
-    btn = document.createElement("div");
-    $(btn).addClass("table-tool-btn");
-    $(btn).attr("key", key);
-    $(btn).attr("title", "增加相關條目");
-    $(btn).on('click', {target: btn}, click_next_level);
-    tmp = document.createElement("span");
-    $(tmp).addClass("glyphicon glyphicon-list-alt");
-    $(btn).append(tmp);
+    btn = elementFactory({
+        type: "div",
+        attr: { key: key, title: "增加相關條目" },
+        class: "table-tool-btn" + ((data.state === 4) ? " disabled" : ""),
+        on: { click: click_related_entry_btn }
+    });
+    $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-list-alt" }));
     $(cell).append(btn);
-
+    // add entire book button
+    btn = elementFactory({
+        type: "div",
+        attr: { key: key, title: "加入整本文獻" },
+        class: "table-tool-btn" + ((data.state === 4) ? " disabled" : ""),
+        on: { click: click_add_entire_book_btn }
+    });
+    $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-book" }));
+    $(cell).append(btn);
     // copy link button
-    btn = document.createElement("div");
-    $(btn).addClass("table-tool-btn");
-    $(btn).attr("key", key);
-    $(btn).attr("title", "複製此條目連結");
-    $(btn).on('click', {target: btn}, click_copy_link);
-    tmp = document.createElement("span");
-    $(tmp).addClass("glyphicon glyphicon-duplicate");
-    $(btn).append(tmp);
+    btn = elementFactory({
+        type: "div",
+        attr: { key: key, title: "複製此條目連結" },
+        class: "table-tool-btn",
+        on: { click: click_copy_link_btn }
+    });
+    $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-duplicate" }));
     $(cell).append(btn);
-
     // error message button
-    btn = document.createElement("div");
-    $(btn).addClass("table-tool-btn");
-    $(btn).attr("key", key);
-    $(btn).attr("title", "查看錯誤訊息");
-    $(btn).css("display", "none");
-    $(btn).on('click', {target: btn}, click_error_message);
-    tmp = document.createElement("span");
-    $(tmp).addClass("glyphicon glyphicon-exclamation-sign");
-    $(btn).append(tmp);
+    btn = elementFactory({
+        type: "div",
+        attr: { key: key, title: "查看錯誤訊息" },
+        class: "table-tool-btn",
+        css: { display: ((data.state === 4) ? " inline-block" : "none") },
+        on: { click: click_error_message_btn }
+    });
+    $(btn).append(elementFactory({ type: "span", class: "glyphicon glyphicon-exclamation-sign" }));
     $(cell).append(btn);
 
     return row;
@@ -374,8 +376,9 @@ function create_wiki_table_row(wiki_doc, state) {
 // Function : new wiki click function
 function click_new_wiki() {
     let text = $("#new-wiki-url");
-    let url = $(text).val();
-    let pattern = new RegExp('(https:\\/\\/((.*\\/)+wiki\\/)([^#]+))(#.*)*');
+    let url = confirm_decode($(text).val());
+    let name;
+    let pattern = new RegExp('((https:\\/\\/((.*\\/)+wiki\\/))([^#]+))(#.*)*');
     if (url.length === 0)
         return;
     if (pattern.exec(url) === null) {
@@ -383,114 +386,44 @@ function click_new_wiki() {
         $(text).val("");
         return;
     } else {
-        url = pattern.exec(url)[1];
+        name = pattern.exec(url)[5];
+        url = pattern.exec(url)[2] + encodeURIComponent(name);
     }
     if (window.table_wiki_list.includes(url)) {
         window.alert("重複的網址！");
         $(text).val("");
         return;
     }
-    window.table_wiki_list.push(url);
-    $("#wiki-table-body").append(create_wiki_table_row({name: null, url: url}, 1));
+    window.corpus_tree.add_child(name, url);
+    refresh_wiki_table();
     $(text).val("");
 }
 
-// Function : create new operate space for clicked corpus item
-function create_corpus_operate(name) {
-    let space = $("#operate-space");
-    let wiki_list = window.handler.get_wiki_list(name);
-    let title = document.createElement("h2");
-    let url_input_group = document.createElement("div");
-    let table_container = document.createElement("div");
-    let table = document.createElement("table");
-    let thead = document.createElement("thead");
-    let tbody = document.createElement("tbody");
-    let row = document.createElement("tr");
-    let tmp;
-
-    // config title
-    $(title).html("文獻集：" + name);
-
-    // config url bar
-    $(url_input_group).addClass("input-group col-md-8 col-md-offset-2");
-    tmp = document.createElement("span");
-    $(tmp).addClass("input-group-addon select-disable");
-    $(tmp).html("維基百科網址");
-    $(url_input_group).append(tmp);
-    tmp = document.createElement("input");
-    $(tmp).addClass("form-control input-group-text");
-    $(tmp).attr("placeholder", "請貼上維基百科網址");
-    $(tmp).attr("id", "new-wiki-url");
-    $(url_input_group).append(tmp);
-    tmp = document.createElement("span");
-    $(tmp).addClass("input-group-addon select-disable span-btn");
-    $(tmp).attr("id", "new-wiki");
-    $(tmp).html("新增");
-    $(tmp).on('click', click_new_wiki);
-    $(url_input_group).append(tmp);
-
-    // config wiki document table
-    $(table_container).addClass("col-md-10 col-md-offset-1");
-    $(table).addClass("table table-striped");
-    tmp = document.createElement("th");
-    $(tmp).css({"text-align": "center", "width": "50px"});
-    $(tmp).html("狀態");
-    $(row).append(tmp);
-    tmp = document.createElement("th");
-    $(tmp).css("width", "200px");
-    $(tmp).html("來源");
-    $(row).append(tmp);
-    tmp = document.createElement("th");
-    $(tmp).html("條目");
-    $(row).append(tmp);
-    tmp = document.createElement("th");
-    $(tmp).css("width", "125px");
-    $(tmp).html("按鈕");
-    $(row).append(tmp);
-    $(thead).append(row);
-    $(table).append(thead);
-
-    // add wiki document row to table
-    $(tbody).attr("id", "wiki-table-body");
-    window.table_wiki_list = [];
-    for (let key in wiki_list) {
-        if (!wiki_list.hasOwnProperty(key))
+// Function : refresh wiki document table
+function refresh_wiki_table() {
+    let row_list = window.corpus_tree.toArray();
+    let tbody = $("#wiki-table-body");
+    window.table_wiki_list = row_list.map(function(val) {
+        return val.url;
+    });
+    $(tbody).html("");
+    for (let idx in row_list) {
+        if (!row_list.hasOwnProperty(idx))
             continue;
-        window.table_wiki_list.push(wiki_list[key].url);
-        $(tbody).append(create_wiki_table_row(wiki_list[key], 0));
+        $(tbody).append(create_wiki_table_row(row_list[idx]));
     }
-    $(table).append(tbody);
-    $(table_container).append(table);
-
-    // clear space and append element
-    $(space).html("");
-    $(space).append(title);
-    $(space).append(url_input_group);
-    $(space).append(table_container);
 }
 
-// Function : update wiki document table with query result
-function update_wiki_table_row(key, result) {
-    let row = $("#" + key);
-    let span = $("#" + key + " td:nth-child(1) span")[0];
-    let del_btn = $("#" + key + " td:nth-child(4) div:nth-child(1)")[0];
-    let rel_btn = $("#" + key + " td:nth-child(4) div:nth-child(2)")[0];
-    let msg_btn = $("#" + key + " td:nth-child(4) div:nth-child(4)")[0];
-    if (result.status) {
-        $(row).attr("status", "0");
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-ok");
-        $(span).css("color", "green");
-    } else {
-        $(row).attr("status", "4");
-        $(row).attr("msg", result.data);
-        $(del_btn).addClass("disabled");
-        $(rel_btn).addClass("disabled");
-        $(msg_btn).css("display", "inline-block");
-        $(span).removeClass();
-        $(span).addClass("glyphicon glyphicon-remove");
-        $(span).css("color", "red");
-    }
+// Function : create new operate space for clicked corpus item
+function load_corpus_content() {
+    $("#corpus-operate-title").html("文獻集：" + window.corpus_target);
+    $("#corpus-operate-url_input-container").show();
+    $("#corpus-operate-wiki_table-container").show();
+
+    // create corpus tree and load corpus content
+    let wiki_list = window.handler.get_wiki_list(window.corpus_target);
+    window.corpus_tree = new corpusTreeRoot(wiki_list);
+    refresh_wiki_table();
 }
 
 // Function : wiki query progress callback function
@@ -506,39 +439,51 @@ function wiki_result_callback(result) {
     for (let idx in result) {
         if (!result.hasOwnProperty(idx))
             continue;
-        if (result[idx].status)
-            window.handler.add_document({ name: $(window.corpus_target).html(), document: result[idx].data });
-        let key = hash(result[idx].url);
-        update_wiki_table_row(key, result[idx]);
+        let pos = $("#" + hash(result[idx].url)).attr("pos");
+        let node = window.corpus_tree.access_child_with_full_position(pos);
+        if (result[idx].status) {
+            node.set_state(0);
+            result[idx].data.wiki_metadata.position = pos;
+            window.handler.add_document({ name: window.corpus_target, document: result[idx].data });
+        } else {
+            node.set_state(4);
+            node.set_message(result[idx].data);
+        }
     }
+    refresh_wiki_table();
     $.unblockUI();
 }
 
 // Event : sync with docuXML
 $("#synchronize").click(function() {
     $("#synchronize").blur();
-    let name = $(window.corpus_target).html();
-    let urls = [];
+    if (window.corpus_target === null)
+        return;
     $.blockUI({
         message: "已取得維基頁面&nbsp;...&nbsp;<span id='numerator'>0</span>&nbsp;/&nbsp;<span id='denominator'></span>"
     });
-    window.table_wiki_list = [];
-    $('#wiki-table-body tr').each(function() {
-        let st = $(this).attr("status");
-        if (st === "0" || st === "1") {
-            window.table_wiki_list.push($(this).attr("url"));
-            urls.push($(this).attr("url"));
-        } else {
-            $(this).remove();
-        }
-    });
-    urls = window.handler.check_necessary_url(name, urls);
+    window.corpus_tree.clean_tree();
+    refresh_wiki_table();
+    let urls = window.handler.check_necessary_url(window.corpus_target, window.table_wiki_list);
     if (urls.length !== 0) {
         $("#denominator").html(urls.length.toString());
         window.get_URL(urls, progress_callback, wiki_result_callback);
     } else {
         $.unblockUI();
     }
+});
+
+// Event : clear changes of the corpus
+$("#clear_corpus_change").click(function() {
+    $("#clear_corpus_change").blur();
+    if (window.corpus_target === null)
+        return;
+    let content = "文獻集將回復至上一次更新後的狀態<br>在那之後所做的變更將不被保留<br>確認清除變更？<br>";
+    check_sync(content, "確認", "取消", function(sync) {
+        if (sync) {
+            load_corpus_content();
+        }
+    });
 });
 
 // Event : back to main page
@@ -574,25 +519,27 @@ $("#download").click(function() {
 // Function : corpus item click function
 function click_corpus_item(e) {
     let self = e.data.target;
-    if ($(self).html() === $(window.corpus_target).html())
+    if ($(self).html() === window.corpus_target)
         return;
     let content = "目前文獻集有條目尚未更新至 docuXML<br>若是切換文獻集則本工具將不會保留該條目<br>是否要切換文獻集？<br>";
     check_sync(content, "確定切換", "取消切換", function(sync) {
         if (sync) {
             $(".corpus-item").removeClass("active");
             $(self).addClass("active");
-            window.corpus_target = $(self);
-            create_corpus_operate($(self).html());
+            window.corpus_target = $(self).html();
+            load_corpus_content();
         }
     });
 }
 
 // Function : create new corpus item in side navigation bar
 function create_corpus_item(name) {
-    let corpus_item = document.createElement("div");
-    $(corpus_item).addClass("corpus-item select-disable");
-    $(corpus_item).html(name);
-    $(corpus_item).on('click', {target: corpus_item}, click_corpus_item);
+    let corpus_item = elementFactory({
+        type: "div",
+        class: "corpus-item select-disable",
+        html: name,
+        on: { click: click_corpus_item }
+    });
     $("#corpus-list").append(corpus_item);
     if (window.corpus_list.length === 1) {
         $(corpus_item).click();
@@ -618,6 +565,7 @@ $("#new-corpus").click(function() {
 
 $(document).ready(function() {
     window_variable_initial();
+    $("#new-wiki").on("click", click_new_wiki);
     if (window.handler !== null) {
         window.corpus_list = window.handler.get_corpus_list();
         if (window.corpus_list.length !== 0) {

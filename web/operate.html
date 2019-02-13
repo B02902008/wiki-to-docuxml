@@ -19,6 +19,11 @@
                         </a>
                     </li>
                     <li>
+                        <a href="#" id="clear_corpus_change">
+                            <span class="glyphicon glyphicon-erase"></span>&nbsp;清空文獻集變更
+                        </a>
+                    </li>
+                    <li>
                         <a href="#" id="download">
                             <span class="glyphicon glyphicon-floppy-save"></span>&nbsp;匯出 DocuXML
                         </a>
@@ -37,6 +42,24 @@
         <div id="corpus-list"></div>
     </div>
     <div id="operate-space">
-        <h1>請先建立一個新的文獻集</h1>
+        <h2 id="corpus-operate-title">請先建立一個新的文獻集</h2>
+        <div id="corpus-operate-url_input-container" class="input-group col-md-8 col-md-offset-2" style="display:none">
+            <span class="input-group-addon select-disable">維基百科網址</span>
+            <input type="text" id="new-wiki-url" placeholder="請貼上維基百科網址" class="form-control input-group-text">
+            <span id="new-wiki" class="input-group-addon select-disable span-btn">新增</span>
+        </div>
+        <div id="corpus-operate-wiki_table-container" class="col-md-10 col-md-offset-1" style="display:none">
+            <table id="wiki-table" class="table table-striped">
+                <thead id="wiki-table-head">
+                    <tr>
+                        <th style="width:50px;text-align:center">狀態</th>
+                        <th style="width:200px">來源</th>
+                        <th>條目</th>
+                        <th style="width:150px">功能</th>
+                    </tr>
+                </thead>
+                <tbody id="wiki-table-body"></tbody>
+            </table>
+        </div>
     </div>
 </div>

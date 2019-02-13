@@ -7,17 +7,16 @@ class XMLHandler {
 			this.xml_root = parser.parseFromString(src, "text/xml");
 		}
 		this.struct = [].slice.call(this.xml_root.getElementsByTagName('corpus')).filter(function(x) {
-			if (x.hasAttribute('name'))
-				return x;
+			return x.hasAttribute('name');
 		}).reduce(function(acc, cur) {
 			let key = cur.getAttribute('name');
-			if (acc[key] === undefined)
+			if (!acc.hasOwnProperty(key))
 				acc[key] = {'corpus': cur, 'wiki': [], 'common': []};
 			return acc;
 		}, {});
 		[].slice.call(this.xml_root.getElementsByTagName('document')).reduce(function(acc, cur) {
 			let key = cur.getElementsByTagName('corpus')[0].innerHTML;
-			if (acc[key] !== undefined) {
+			if (acc.hasOwnProperty(key)) {
 				if (cur.getElementsByTagName('wiki_metadata').length === 1)
 					acc[key].wiki.push(cur);
 				else
@@ -39,14 +38,15 @@ class XMLHandler {
 	}
 	get_wiki_list(key) {
 		/*
-			return value = [{'name': wiki_name, 'url': wiki_url}, {'name': wiki_name, 'url': wiki_url}, ...]
+			return value = [{'name': wiki_name, 'url': wiki_url, 'position': corpus_tree_position} ...]
 		 */
 		let tmp = [];
 		if (this.struct.hasOwnProperty(key)) {
 		    this.struct[key].wiki.reduce(function(acc, cur) {
 			    acc.push({
 				    'name': cur.getAttribute('filename'),
-				    'url': cur.getElementsByTagName('wiki_metadata')[0].getElementsByTagName('url')[0].textContent
+				    'url': cur.getElementsByTagName('wiki_metadata')[0].getElementsByTagName('url')[0].textContent,
+					'position': cur.getElementsByTagName('wiki_metadata')[0].getElementsByTagName('position')[0].textContent
 			    });
 			    return acc;
 		    }, tmp);

@@ -19,7 +19,7 @@ function query(url, con_str) {
 	try {
 		re = api_call(url, con_str); // call mediawiki api to get full content
 	} catch (err) {
-		console.log(err);
+		//console.log(err);
 		postMessage({"url": url, "status": false, "data": "Cannot sent http request. Please check url or internet connection."});
 		return;
 	}
