@@ -241,12 +241,12 @@ function recursive_add(key) {
                 }
             }
             refresh_wiki_table();
-            window.entire_book_check_queue.shift();
-            if (window.entire_book_check_queue.length !== 0)
-                recursive_add(window.entire_book_check_queue[0]);
-            else
-                $.unblockUI();
         }
+        window.entire_book_check_queue.shift();
+        if (window.entire_book_check_queue.length !== 0)
+            recursive_add(window.entire_book_check_queue[0]);
+        else
+            $.unblockUI();
     });
 }
 
